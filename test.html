@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Photo Viewer Test v2</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { 
+      font-family: 'Inter', -apple-system, sans-serif; 
+      background: #1a1a1a;
+      min-height: 100vh;
+    }
+    
+    /* ============================================
+       PHOTO VIEWER v2
+       ============================================ */
+    .photo-viewer {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.98);
+      display: flex;
+      flex-direction: column;
+      z-index: 600;
+    }
+    
+    /* Header Bar - transparent, overlay */
+    .pv-header {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      align-items: center;
+      height: 56px;
+      padding: 0 8px;
+      padding-top: env(safe-area-inset-top, 0);
+      background: transparent;
+      gap: 8px;
+      z-index: 10;
+    }
+    
+    .pv-header-btn {
+      width: 44px;
+      height: 44px;
+      border: none;
+      background: rgba(0,0,0,0.5);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.15s;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+    .pv-header-btn:active { background: rgba(0,0,0,0.7); }
+    .pv-header-btn.menu.active { background: rgba(139,92,246,0.6); }
+    
+    .pv-counter {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: white;
+      flex-shrink: 0;
+      min-width: 50px;
+      background: rgba(0,0,0,0.5);
+      padding: 4px 10px;
+      border-radius: 12px;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+    
+    .pv-header-center {
+      flex: 1;
+      min-width: 0;
+      text-align: center;
+    }
+    
+    .pv-filename {
+      font-size: 0.8rem;
+      color: white;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      background: rgba(0,0,0,0.5);
+      padding: 4px 12px;
+      border-radius: 12px;
+      display: inline-block;
+      max-width: 100%;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+    
+    .pv-header-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    
+    /* Pill buttons (unified style) - with blur for transparent bg */
+    .pill-s {
+      height: 32px;
+      padding: 0 14px;
+      border: none;
+      background: rgba(0,0,0,0.5);
+      border-radius: 16px;
+      font-family: inherit;
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: white;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      transition: background 0.15s;
+      white-space: nowrap;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+    .pill-s:active { background: rgba(0,0,0,0.7); }
+    .pill-s.ai { background: rgba(139,92,246,0.6); }
+    .pill-s.ai:active { background: rgba(139,92,246,0.8); }
+    .pill-s.delete { background: rgba(239,68,68,0.5); color: #fff; }
+    .pill-s.delete:active { background: rgba(239,68,68,0.7); }
+    
+    /* Dropdown Tools Menu with animation - transparent, overlay */
+    .pv-tools-menu {
+      position: absolute;
+      top: calc(56px + env(safe-area-inset-top, 0px));
+      left: 0;
+      right: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 0 12px;
+      background: transparent;
+      max-height: 0;
+      overflow: hidden;
+      opacity: 0;
+      transition: max-height 0.25s ease-out, opacity 0.2s ease-out, padding 0.25s ease-out;
+      z-index: 10;
+    }
+    .pv-tools-menu.show { 
+      max-height: 150px;
+      opacity: 1;
+      padding: 10px 12px;
+    }
+    
+    .pv-tools-row {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      padding-bottom: 2px;
+    }
+    .pv-tools-row::-webkit-scrollbar { display: none; }
+    
+    /* Photo Area - full screen */
+    .pv-content {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    
+    .pv-content img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+    
+    /* Navigation Arrows */
+    .pv-nav {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 44px;
+      height: 44px;
+      background: rgba(0,0,0,0.5);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      z-index: 5;
+    }
+    .pv-nav:active { background: rgba(0,0,0,0.7); }
+    .pv-nav.prev { left: 12px; }
+    .pv-nav.next { right: 12px; }
+    
+    /* ============================================
+       INFO MODAL
+       ============================================ */
+    .info-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      opacity: 0;
+      visibility: hidden;
+      transition: all 0.2s;
+      z-index: 700;
+    }
+    .info-modal.show { opacity: 1; visibility: visible; }
+    
+    .info-modal-content {
+      background: #fff;
+      border-radius: 20px;
+      width: 100%;
+      max-width: 400px;
+      max-height: 80vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .info-modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid #e5e5e5;
+    }
+    .info-modal-header h3 {
+      margin: 0;
+      font-size: 1.1rem;
+      color: #333;
+    }
+    .info-modal-close {
+      width: 32px;
+      height: 32px;
+      border: none;
+      background: #f0f0f0;
+      border-radius: 50%;
+      font-size: 1rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #666;
+    }
+    .info-modal-close:active { background: #e0e0e0; }
+    
+    .info-modal-body {
+      padding: 16px 20px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    
+    .info-section {
+      margin-bottom: 16px;
+    }
+    .info-section:last-child { margin-bottom: 0; }
+    
+    .info-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      color: #888;
+      margin-bottom: 4px;
+    }
+    
+    .info-value {
+      font-size: 0.95rem;
+      color: #333;
+      line-height: 1.4;
+    }
+    
+    .info-textarea {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #e5e5e5;
+      border-radius: 12px;
+      font-family: inherit;
+      font-size: 0.95rem;
+      resize: none;
+      min-height: 80px;
+    }
+    .info-textarea:focus {
+      outline: none;
+      border-color: #8B5CF6;
+    }
+    
+    .info-modal-actions {
+      display: flex;
+      gap: 10px;
+      padding: 16px 20px;
+      border-top: 1px solid #e5e5e5;
+    }
+    
+    .info-btn {
+      flex: 1;
+      padding: 14px;
+      border: none;
+      border-radius: 12px;
+      font-family: inherit;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .info-btn.cancel { background: #f0f0f0; color: #666; }
+    .info-btn.save { background: #8B5CF6; color: white; }
+    
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 100px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #333;
+      color: white;
+      padding: 12px 24px;
+      border-radius: 25px;
+      font-size: 0.9rem;
+      opacity: 0;
+      transition: opacity 0.2s;
+      z-index: 999;
+    }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+  <div class="photo-viewer">
+    <!-- Header -->
+    <div class="pv-header">
+      <button class="pv-header-btn menu" id="menuBtn" onclick="toggleMenu()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+      </button>
+      <span class="pv-counter">3 / 12</span>
+      <div class="pv-header-center">
+        <div class="pv-filename">IMG_20260111_153042.jpg</div>
+      </div>
+      <div class="pv-header-right">
+        <button class="pill-s" onclick="openInfoModal()">Info</button>
+        <button class="pv-header-btn close" onclick="showToast('Close viewer')">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+    
+    <!-- Tools Menu (hidden by default) -->
+    <div class="pv-tools-menu" id="toolsMenu">
+      <div class="pv-tools-row">
+        <button class="pill-s" onclick="showToast('Share')">Share</button>
+        <button class="pill-s" onclick="showToast('Download')">Download</button>
+        <button class="pill-s" onclick="showToast('Markers')">Markers</button>
+        <button class="pill-s delete" onclick="showToast('Delete')">Delete</button>
+      </div>
+      <div class="pv-tools-row">
+        <button class="pill-s ai" onclick="showToast('OCR')">OCR</button>
+        <button class="pill-s ai" onclick="showToast('Describe')">Describe</button>
+        <button class="pill-s" onclick="openInfoModal()">Edit Caption</button>
+      </div>
+    </div>
+    
+    <!-- Photo Area -->
+    <div class="pv-content">
+      <img src="https://picsum.photos/800/600" alt="Test photo">
+    </div>
+    
+    <!-- Navigation Arrows (outside content for touch handling) -->
+    <div class="pv-nav prev" onclick="showToast('Previous')">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M15 18l-6-6 6-6"/></svg>
+    </div>
+    <div class="pv-nav next" onclick="showToast('Next')">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M9 18l6-6-6-6"/></svg>
+    </div>
+  </div>
+  
+  <!-- INFO Modal -->
+  <div class="info-modal" id="infoModal" onclick="if(event.target===this)closeInfoModal()">
+    <div class="info-modal-content">
+      <div class="info-modal-header">
+        <h3>Photo Info</h3>
+        <button class="info-modal-close" onclick="closeInfoModal()">✕</button>
+      </div>
+      <div class="info-modal-body">
+        <div class="info-section">
+          <div class="info-label">Filename</div>
+          <div class="info-value">IMG_20260111_153042.jpg</div>
+        </div>
+        <div class="info-section">
+          <div class="info-label">Date & Time</div>
+          <div class="info-value">11 January 2026, 15:30</div>
+        </div>
+        <div class="info-section">
+          <div class="info-label">Category</div>
+          <div class="info-value">Photo</div>
+        </div>
+        <div class="info-section">
+          <div class="info-label">Caption / Notes</div>
+          <textarea class="info-textarea" placeholder="Add caption or notes...">This is a test caption for the photo viewer.</textarea>
+        </div>
+      </div>
+      <div class="info-modal-actions">
+        <button class="info-btn cancel" onclick="closeInfoModal()">Cancel</button>
+        <button class="info-btn save" onclick="saveInfo()">Save</button>
+      </div>
+    </div>
+  </div>
+  
+  <div class="toast" id="toast"></div>
+
+  <script>
+    let menuOpen = false;
+    
+    function toggleMenu() {
+      const menu = document.getElementById('toolsMenu');
+      const btn = document.getElementById('menuBtn');
+      menuOpen = !menuOpen;
+      
+      if (menuOpen) {
+        menu.classList.add('show');
+        btn.classList.add('active');
+      } else {
+        menu.classList.remove('show');
+        btn.classList.remove('active');
+      }
+    }
+    
+    function openInfoModal() {
+      document.getElementById('infoModal').classList.add('show');
+    }
+    
+    function closeInfoModal() {
+      document.getElementById('infoModal').classList.remove('show');
+    }
+    
+    function saveInfo() {
+      showToast('Info saved!');
+      closeInfoModal();
+    }
+    
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 1500);
+    }
+  </script>
+
+</body>
+</html>
