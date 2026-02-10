@@ -46,7 +46,26 @@ async function initSupabase() {
     supabaseClient = window._supabaseClient;
     
     // Check for existing session
-    const { data: { session } } = await supabaseClient.auth.getSession();
+    let { data: { session } } = await supabaseClient.auth.getSession();
+    
+    // v1.2: ALWAYS refresh token on init — cached expires_at can be stale
+    // refreshSession() is cheap and idempotent
+    if (session) {
+      console.log('🔄 Refreshing JWT token...');
+      try {
+        const { data: refreshData, error: refreshError } = await supabaseClient.auth.refreshSession();
+        if (refreshError) {
+          console.warn('⚠️ Token refresh failed:', refreshError.message, '— will re-login');
+          session = null;
+        } else if (refreshData?.session) {
+          session = refreshData.session;
+          console.log('✅ Token refreshed, expires:', new Date(session.expires_at * 1000).toLocaleTimeString());
+        }
+      } catch (e) {
+        console.warn('⚠️ Token refresh error:', e.message);
+        session = null;
+      }
+    }
     
     // If session exists but NOT our test user - sign out first
     const TEST_USER_ID = '10531fa2-b07e-41db-bc41-f6bd955beb26';
@@ -230,19 +249,17 @@ async function pullFromServer() {
   if (!currentUser) return;
   
   try {
-    const { data, error } = await supabaseClient
+    // Lightweight sync check — just count, don't pull full data
+    // Full merge will be implemented in TODO: proper conflict resolution
+    const { count, error } = await supabaseClient
       .from('drops')
-      .select('*')
-      .eq('user_id', currentUser.id)
-      .is('deleted_at', null)
-      .order('created_at', { ascending: false });
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', currentUser.id);
     
     if (error) throw error;
     
-    if (data && data.length > 0) {
-      console.log(`📥 Pulled ${data.length} drops from server`);
-      // Merge with local (server wins for now)
-      // TODO: proper conflict resolution
+    if (count > 0) {
+      console.log(`📥 Server has ${count} drops (sync check only)`);
     }
     
     lastSyncTime = new Date();

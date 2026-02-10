@@ -1,5 +1,5 @@
 // ============================================
-// DROPLIT CHAT v4.27 - Auto Model Selection
+// DROPLIT CHAT v4.29 - Voice Interrupt Fix
 // ASKI Chat, Voice Mode, Streaming
 // Haiku for simple, Sonnet for complex queries
 // ============================================
@@ -623,13 +623,33 @@ function openAskAI() {
 }
 
 function handleChatControlLeft() {
-  // If ASKI is speaking (any TTS including streaming) - stop it
-  if (askiIsSpeaking || currentTTSAudio || streamingTTSIsActive) {
-    askiStopSpeaking();
-    stopTTS();
-    // Reset streaming flag
+  // If ASKI is speaking, processing, or any TTS active - STOP everything
+  if (askiIsSpeaking || askiIsProcessing || currentTTSAudio || streamingTTSIsActive) {
+    console.log('[Chat] STOP pressed — suppressing all audio');
+    
+    // v4.29: Suppress kills current + blocks in-flight fetches from playing
+    if (window.suppressAudio) {
+      window.suppressAudio();
+    } else {
+      askiStopSpeaking();
+      stopTTS();
+    }
     streamingTTSIsActive = false;
+    
+    // Reset processing state
+    askiIsProcessing = false;
+    askiIsSpeaking = false;
+    voiceModeLocked = false;
+    setAskiBusy(false);
+    
+    // Reset LEFT button → HIDE
     updateChatControlLeft('hide');
+    
+    // Reset RIGHT button → TAP TO TALK / sleeping
+    if (isVoiceModeEnabled()) {
+      voiceModeSleeping = true;
+      updateVoiceModeIndicator('sleeping');
+    }
     return;
   }
   // Otherwise - close chat
@@ -2013,6 +2033,9 @@ async function askiSpeak(text, lang = null, onEnd = null) {
     askiStopSpeaking();
   }
   
+  // v4.29: New audio session — invalidates any in-flight TTS fetches
+  if (window.newAudioSession) window.newAudioSession();
+  
   // Remove emojis before speaking
   const cleanText = removeEmojis(text);
   if (!cleanText) {
@@ -2048,6 +2071,7 @@ async function askiSpeak(text, lang = null, onEnd = null) {
 
 // OpenAI TTS
 async function askiSpeakOpenAI(text, onEnd = null) {
+  const mySession = window.getAudioSessionId ? window.getAudioSessionId() : 0;
   try {
     askiIsSpeaking = true;
     updateSpeakingIndicator(true);
@@ -2076,7 +2100,25 @@ async function askiSpeakOpenAI(text, onEnd = null) {
       return;
     }
     
+    // SESSION CHECK: Still valid after fetch?
+    if (window.canPlayAudio && !window.canPlayAudio(mySession)) {
+      console.log('[askiSpeakOpenAI] Session expired, skipping playback');
+      askiIsSpeaking = false;
+      updateSpeakingIndicator(false);
+      if (onEnd) onEnd();
+      return;
+    }
+    
     const blob = await response.blob();
+    
+    // SESSION CHECK again before play
+    if (window.canPlayAudio && !window.canPlayAudio(mySession)) {
+      console.log('[askiSpeakOpenAI] Session expired before play');
+      askiIsSpeaking = false;
+      updateSpeakingIndicator(false);
+      if (onEnd) onEnd();
+      return;
+    }
     
     // Play using AudioContext (works on Android!)
     const success = await playAudioBlob(blob, () => {
@@ -2109,12 +2151,12 @@ async function askiSpeakElevenLabs(text, onEnd = null) {
     return;
   }
   
+  const mySession = window.getAudioSessionId ? window.getAudioSessionId() : 0;
   try {
     askiIsSpeaking = true;
     updateSpeakingIndicator(true);
     updateVoiceModeIndicator('speaking');
     
-    // Use stored voice ID
     const voiceId = elevenlabsVoiceId || 'EXAVITQu4vr4xnSDxMaL';
     
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
@@ -2144,7 +2186,24 @@ async function askiSpeakElevenLabs(text, onEnd = null) {
       return;
     }
     
+    // SESSION CHECK
+    if (window.canPlayAudio && !window.canPlayAudio(mySession)) {
+      console.log('[askiSpeakElevenLabs] Session expired, skipping');
+      askiIsSpeaking = false;
+      updateSpeakingIndicator(false);
+      if (onEnd) onEnd();
+      return;
+    }
+    
     const blob = await response.blob();
+    
+    if (window.canPlayAudio && !window.canPlayAudio(mySession)) {
+      console.log('[askiSpeakElevenLabs] Session expired before play');
+      askiIsSpeaking = false;
+      updateSpeakingIndicator(false);
+      if (onEnd) onEnd();
+      return;
+    }
     
     // Play using AudioContext (works on Android!)
     const success = await playAudioBlob(blob, () => {
@@ -2846,9 +2905,15 @@ function askiStopSpeaking() {
 // Toggle speak for a message
 function toggleAskiSpeak(btn) {
   if (askiIsSpeaking) {
-    askiStopSpeaking();
+    // v4.29: Suppress to block in-flight fetches too
+    if (window.suppressAudio) window.suppressAudio();
+    else askiStopSpeaking();
+    askiIsSpeaking = false;
     return;
   }
+  
+  // v4.29: Clear suppression for manual playback
+  if (window.setAudioSuppressed) window.setAudioSuppressed(false);
   
   const bubble = btn.closest('.ask-ai-message').querySelector('.ask-ai-bubble');
   const text = bubble.textContent;
@@ -4352,6 +4417,10 @@ function hideAskAITyping() {
 
 async function sendAskAIMessage() {
   console.log('sendAskAIMessage called');
+  
+  // v4.29: Clear audio suppression — new message = allow audio again
+  if (window.setAudioSuppressed) window.setAudioSuppressed(false);
+  
   const input = document.getElementById('askAIInput');
   const text = input.value.trim();
   console.log('Text:', text);
@@ -4504,7 +4573,7 @@ async function sendAskAIMessage() {
         action: 'chat',
         text: textForAI || 'Что на этом изображении?',  // Default question for image-only (v0.9.117)
         image: attachedImage?.data || null, // v0.9.117: Attached image base64
-        history: askAIMessages.slice(-20), // v4.26: More context from chat history
+        history: askAIMessages.slice(-21, -1), // v4.29: Exclude last msg (sent as 'text'), take 20 before it
         syntriseContext: syntriseContext, // Legacy
         dropContext: contextObject, // v2: Structured context for server
         currentFeed: currentFeed, // v4.17: Actual drops from user's feed
@@ -4745,7 +4814,7 @@ function copyAIResponse(btn) {
 }
 
 function toggleAskAIVoice() {
-  const btn = document.getElementById('askAIVoiceBtn');
+  const btn = document.getElementById('askAIControlRight');
   
   // === VOICE MODE ENABLED ===
   if (isVoiceModeEnabled()) {
@@ -4756,14 +4825,27 @@ function toggleAskAIVoice() {
     }
     
     // If listening/active - go to sleep (user wants to stop)
-    if (voiceModeRecognition || btn.classList.contains('recording')) {
+    if (voiceModeRecognition || (btn && btn.classList.contains('recording'))) {
       enterVoiceModeSleep();
       return;
     }
     
-    // If locked (Aski speaking/processing) - just show message
-    if (voiceModeLocked || askiIsProcessing || askiIsSpeaking) {
-      toast('Wait for Aski to finish');
+    // If ASKI is speaking - STOP playback (allow interruption)
+    if (askiIsSpeaking) {
+      console.log('[Voice] User interrupted ASKI — suppressing audio');
+      if (window.suppressAudio) window.suppressAudio();
+      else { askiStopSpeaking(); stopTTS(); }
+      streamingTTSIsActive = false;
+      askiIsSpeaking = false;
+      voiceModeLocked = false;
+      updateChatControlLeft('hide');
+      enterVoiceModeSleep();
+      return;
+    }
+    
+    // If processing (waiting for API response) - just show message
+    if (askiIsProcessing) {
+      toast('ASKI is thinking...');
       return;
     }
     
